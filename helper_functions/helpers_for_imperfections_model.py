@@ -713,7 +713,6 @@ def apply_orbit_correction(line, twiss_table, monitor_alignment=None, ds_thread=
     Perform orbit correction, using the standard correct_trajectory method. However, if the closed orbit search 
     fails due to the presence of strong lattice perturbations, the function falls back to the threading method, 
     which allows to correct the orbit even in such cases.
-    There is the option to plot the singular values of the orbit response matrix.
 
     Parameters
     ----------
