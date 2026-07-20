@@ -14,8 +14,8 @@ The applied imperfections include:
 of the dipoles, quadrupoles, and sextupoles in the arcs and the straight sections.
 
 The lattices with imperfections are found inside the folder:
-lattices/choose_line_version/lattices_with_imperfections.
+lattices/choose_line_version/lattices_with_imperfections
 
-Applying a global orbit and optics correction scheme generates lattices with corrected imperfections, which are found inside the folder: lattices/choose_line_version/lattices_with_corrected_imperfections/03_orbit_and_optics_corrected_with_radiation_FINAL.
+Applying a global orbit and optics correction scheme generates lattices with corrected imperfections, which are found inside the folder: lattices/choose_line_version/lattices_with_corrected_imperfections/03_orbit_and_optics_corrected_with_radiation_FINAL
 
 Many thanks to: K. André, S. Jagabathuni, W. Herr, G. Katsanevakis, P. Raimondi, K. Skoufaris, L. van Riesen-Haupt, Y. Wu
