@@ -1,4 +1,5 @@
 import xtrack as xt
+import xfields as xf
 import xpart as xp
 import numpy as np
 
@@ -352,3 +353,103 @@ def generate_particle_grid(line, study_param, particle_capacity=None, cartesian_
             line[jj].scale_strength = dd_bb[jj]
 
     return (particles, grid_details)
+
+
+def install_beam_beam_elements (line, reference_parameters, beam_beam_parameters, ip_list=None):
+
+    normalized_emittance_x= reference_parameters['normalized_emittance_x']
+    normalized_emittance_y = reference_parameters['normalized_emittance_y']
+    bunch_length = reference_parameters['bunch_length']
+    bunch_population = reference_parameters['bunch_population']
+    half_xing_angle = beam_beam_parameters['half_xing_angle']
+    xing_plane = beam_beam_parameters['xing_plane']
+    beamstrahlung_on = beam_beam_parameters['beamstrahlung_on']
+    num_slices = beam_beam_parameters['num_slices']
+    binning_mode = beam_beam_parameters['binning_mode'] 
+
+    # set the oposite sign for the other reference particle
+    particle_ref_rev = line.particle_ref.copy()
+    particle_ref_rev.q0 = -particle_ref_rev.q0
+
+    # use the reverse method due to the lack of the other beam lattice (for now)
+    tw_rev = line.twiss(method='6d', particle_ref=particle_ref_rev, reverse=True)
+
+    if ip_list is None:
+        # if reference_parameters['optics_type'] == 'GHC':
+        #     ip_list = ['ipa.1','ipd.1','ipg.1','ipj.1']
+        # elif reference_parameters['optics_type'] == 'LCC':
+        #     ip_list = ['ip:0','ip:2','ip:4','ip:6']
+        ip_list = tw_rev.rows['ip.*'].name.tolist()[::-2]
+    
+    # definition and installation of beam beam
+    line.discard_tracker() # needed to modify the line structure
+    bb_elem_name = []
+    sigmas = tw_rev.get_betatron_sigmas(nemitt_x=normalized_emittance_x, nemitt_y=normalized_emittance_y)
+    #z_centroid, z_cuts, n_part_slice = constant_charge_slicing_gaussian(bunch_population, bunch_length, 70)
+    slicer = xf.TempSlicer(n_slices = num_slices, sigma_z = bunch_length, mode = binning_mode)
+    for ii in ip_list:
+
+        bb_elem_name.append('beambeam_'+ii)
+
+        bb_element = xf.BeamBeamBiGaussian3D(
+
+            phi = half_xing_angle,
+            alpha = xing_plane,
+            other_beam_q0 = particle_ref_rev.q0,
+
+            slices_other_beam_num_particles = slicer.bin_weights * bunch_population,   #n_part_slice[::-1],
+            slices_other_beam_zeta_center = slicer.bin_centers,   #z_centroid[::-1],
+
+            slices_other_beam_Sigma_11 = sigmas['Sigma11',ii],
+            slices_other_beam_Sigma_12 = sigmas['Sigma12',ii],
+            slices_other_beam_Sigma_13 = sigmas['Sigma13',ii],
+            slices_other_beam_Sigma_14 = sigmas['Sigma14',ii],
+            slices_other_beam_Sigma_22 = sigmas['Sigma22',ii],
+            slices_other_beam_Sigma_23 = sigmas['Sigma23',ii],
+            slices_other_beam_Sigma_24 = sigmas['Sigma24',ii],
+            slices_other_beam_Sigma_33 = sigmas['Sigma33',ii],
+            slices_other_beam_Sigma_34 = sigmas['Sigma34',ii],
+            slices_other_beam_Sigma_44 = sigmas['Sigma44',ii],
+
+            slices_other_beam_zeta_bin_width_star_beamstrahlung = None if not beamstrahlung_on else slicer.bin_widths_beamstrahlung / np.cos(half_xing_angle), 
+
+        )
+
+        line.insert_element(bb_elem_name[-1], bb_element, at=ii)
+        
+        # switch off beambeam
+        line[bb_elem_name[-1]].scale_strength = 0
+
+    line.build_tracker()
+
+    return (bb_elem_name)
+
+
+def set_beam_beam_scale(line, value, ip_list=None):
+    if ip_list is None:
+        ip_list = get_ip_list(line)
+    for ii in ip_list:
+        line[f'beambeam_{ii}'].scale_strength = value
+
+
+def set_BBelem_shift(line, twiss_table):
+    """
+    Set the shift of the beam-beam elements based on the x and y values from the Twiss table for the corresponding IPs.
+    The function assumes that the beam-beam elements in the line are named in the format 'beambeam_ip'.
+    It retrieves the beam-beam elements from the line, extracts the corresponding IP name, and sets the shift_x and shift_y attributes of the beam-beam elements to the x and y values from the Twiss table for the corresponding IP.   
+    
+    Parameters
+    ----------
+    line (xt.Line): The line containing the beam-beam elements.
+    twiss_table (xt.Table): The Twiss table containing the x and y values for the IPs corresponding to the beam-beam elements. 
+                            The Twiss table for the line with beam-beam elements installed but set to 0 should be used.
+    
+    Returns
+    ----------
+    None
+        The function modifies the line in place.
+    """
+    tt_BB = line.get_table().rows['beambeam.*']
+    for bbel in tt_BB.name:
+        line.element_refs[bbel].shift_x = twiss_table.rows[bbel.split('_')[1]].x[0]
+        line.element_refs[bbel].shift_y = twiss_table.rows[bbel.split('_')[1]].y[0]
