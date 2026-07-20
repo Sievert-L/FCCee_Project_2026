@@ -2,7 +2,7 @@
 ## Master's Project 2026
 ### Lara Sophie Sievert (Supervisor: Dr. Tirsi Prebibaj)
 
-Development of an imperfections model of the FCC-ee for the LCC lattice at the Z pole and the design of a correction scheme to generate lattices with corrected imperfections, which are used to study the impact of beam-beam interactions.
+#### Development of an imperfections model of the FCC-ee for the LCC lattice at the Z pole and the design of a correction scheme to generate lattices with corrected imperfections, which are used to study the impact of beam-beam interactions.
 
 The generic implementation of this model (in Xsuite) allows for it to be extended to all the other FCC-ee energies as well as other accelerators.
 The chosen error tolerances for the applied imperfections can easily be modified.
