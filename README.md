@@ -16,7 +16,7 @@ of the dipoles, quadrupoles, and sextupoles in the arcs and the straight section
 
 The helper functions needed to build the imperfections model are stored inside the `helper_functions` folder. Example usage is provided in the code scripts stored inside the `create_imperfections_model_with_corrections` folder.
 
-The procedure to follow is the following:
+The procedure to follow is:
 1. **Apply imperfections** to the chosen elements in the lattice using regular-expression based filtering. The error configurations can be controlled through switch variables. The lattices with imperfections switches are found inside the folder:
 `lattices/choose_line_version/lattices_with_imperfections`
 
