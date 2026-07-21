@@ -22,8 +22,8 @@ The procedure to follow is the following:
 
 2. **Apply a global orbit and optics correction scheme** (using the response matrix approach). The correction routine generates lattices with corrected imperfections, which are found inside the folder: `lattices/choose_line_version/lattices_with_corrected_imperfections/03_orbit_and_optics_corrected_with_radiation_FINAL`
 
-3. **Investigate the impact of beam-beam effects** in lattices with corrected imperfections using the scripts provided in the `install_beambeam_effects` folder.
+3. **Investigate the impact of beam-beam effects** in lattices with corrected imperfections using the scripts provided inside the `install_beambeam_effects` folder.
 
 For questions, contact <lara.sophie.sievert@cern.ch>.
 
-Many thanks to: K. André, S. Jagabathuni, W. Herr, G. Katsanevakis, P. Raimondi, K. Skoufaris, L. van Riesen-Haupt, Y. Wu
+Many thanks to: K. André, S. Jagabathuni, W. Herr, G. Katsanevakis, T. Pieloni, T. Prebibaj, P. Raimondi, M. Seidel, K. Skoufaris, L. van Riesen-Haupt, Y. Wu
