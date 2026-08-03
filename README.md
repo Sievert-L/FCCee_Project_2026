@@ -20,7 +20,7 @@ The procedure to follow is:
 1. **Apply imperfections** to the chosen elements in the lattice using regular-expression based filtering. The error configurations can be controlled through switch variables. The lattices with imperfections switches are found inside the folder:
 `lattices/choose_line_version/lattices_with_imperfections`
 
-2. **Apply a global orbit and optics correction scheme** (using the response matrix approach). The correction routine generates lattices with corrected imperfections, which are found inside the folder: `lattices/choose_line_version/lattices_with_corrected_imperfections/03_orbit_and_optics_corrected_with_radiation_FINAL`. The response matrices are stored inside the helper_files_for_RM folder, but the scripts used for the RM generation are also provided in the same folder.
+2. **Apply a global orbit and optics correction scheme** (using the response matrix approach). The correction routine generates lattices with corrected imperfections, which are found inside the folder: `lattices/choose_line_version/lattices_with_corrected_imperfections/03_orbit_and_optics_corrected_with_radiation_FINAL`. The response matrices are stored inside the `helper_files_for_RM folder`. The scripts used for the RM generation are provided in the same folder.
 
 3. **Investigate the impact of beam-beam effects** in lattices with corrected imperfections using the scripts provided inside the `install_beambeam_effects` folder.
 
