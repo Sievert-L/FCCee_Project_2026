@@ -1,6 +1,18 @@
 # ============================
 # HTCondor submission file
 # ============================
+# For submission on htcondor, the following documents are needed:
+# this submission script
+# the executable script
+# a python environment (see details below)
+# the code script to be run (called inside the executable file)
+
+# The submission script, the executable script and the python environment are stored inside the htcondor_submissions folder on afs.
+# The code script to be run is stored on eos.
+# In order to submit from afs, use the command condor_submit submission_script_name
+# In order to check the status of the submission, use condor_q
+# The results are then to appear in the eos folder specified in the executable script.
+# Note that whilst this setup works for the specific demands of the code scripts used here, more sophisticatd htcondor submission setups exist!
 
 # To be modified for each submission:
 # log folder name (remember to create it inside the htcondor_submissions folder using mkdir -p logs_orbit_correction)
