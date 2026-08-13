@@ -1,5 +1,3 @@
-from ast import pattern
-from random import seed
 import warnings
 import numpy as np
 import xtrack as xt
@@ -22,7 +20,7 @@ def find_elements(tt, pattern=None, marker_pairs=None, element_type=None, except
     pattern : str or list of str, optional
         Regular expression(s) to match element names. If provided, elements matching these patterns will be selected.
     marker_pairs : list of tuples, optional
-        List of marker pairs (start_marker, end_marker) to define sections of the line. Elements within these sections will be selected.
+        List of marker pairs (start_marker, end_marker) to define sections of the line. If provided, elements within these sections will be selected.
     element_type : str, optional
         If specified, only elements of this type are returned.
     except_pattern : str or list of str, optional
@@ -189,9 +187,7 @@ def _apply_random_values(element_names, line, attrs, vals,
                     setattr(elem, a, (current * (1 + val * line.vars[switch_name])) if switch_name is not None else (current * (1+val)))
                     
 
-def _group_arc_elements_in_girders(tt, arcquad_names, 
-                                  element_types=None, allowed_names=None
-                                  ):
+def _group_arc_elements_in_girders(tt, arcquad_names, element_types=None, allowed_names=None):
     '''
     Group elements that share the same girder. The assumed model is that there is a girder per arc
     quadrupole, that includes additionally a sextupole, BPM, dipole correctors, and quad correctors. 
@@ -332,12 +328,10 @@ def apply_errors(line, seed, sigmas, attrs, pattern=None, marker_pairs=None, swi
 
 
 def apply_girder_misalignments(line, seed, sigmas, attrs, switch_name=None, line_table=None, 
-                               arcquads_regex = ['qf2a', 'qf3a', 'qd1a'], 
-                               arcsexts_regex=['sf1a', 'sd1a', 'sf2a', 'sd2a'],
-                               marker_pairs_arcquads=None, marker_pairs_arcsexts=None):
+                               arcquads_regex=None, arcsexts_regex=None, marker_pairs_arcs=None):
     """
     Apply the same misalignment to all elements in the same girder, by grouping the elements based on the closest bends.
-    For now, only applied to the arc quadrupoles and sextupoles.
+    For now, only applied to the arc quadrupoles and sextupoles, which are filtered using either the provided regex patterns or the marker pairs.
 
     Parameters
     ----------
@@ -350,17 +344,21 @@ def apply_girder_misalignments(line, seed, sigmas, attrs, switch_name=None, line
     attrs : list of str
         Attributes to modify.
     switch_name : str, optional
-        Name of the switch to control the application of the random values. If None, the values are applied directly without being multiplied by a switch variable.
+        Name of the switch to control the application of the random values. 
+        If None, the values are applied directly without being multiplied by a switch variable.
     line_table : xtrack.LineTable, optional
         Line table to use for searching. If None, the line's table is calculated and used.
     arcquads_regex : list of str, optional
-        List of regular expressions to identify the arc quadrupoles that define the girders. Default is ['qf2a', 'qf3a', 'qd1a'].
+        List of regular expressions to identify the arc quadrupoles that define the girders. 
+        If not provided, marker_pairs_arcs must be used to filter out the elements.
+        For FCC-ee, the regex pattern for arc quadrupoles is ['qf2a', 'qf3a', 'qd1a'].
     arcsexts_regex : list of str, optional
-        List of regular expressions to identify the arc sextupoles. Default is ['sf1a', 'sd1a', 'sf2a', 'sd2a'].
-    marker_pairs_arcquads : list of tuples, optional
-        List of marker pairs to define sections of the line for arc quadrupoles. If not provided, the arc quadrupoles are identified using the arcquads_regex.
-    marker_pairs_arcsexts : list of tuples, optional
-        List of marker pairs to define sections of the line for arc sextupoles. If not provided, the arc sextupoles are identified using the arcsexts_regex.
+        List of regular expressions to identify the arc sextupoles. 
+        If not provided, marker_pairs_arcs must be used to filter out the elements.
+        For FCC-ee, the regex pattern for arc sextupoles is ['sf1a', 'sd1a', 'sf2a', 'sd2a'].
+    marker_pairs_arcs : list of tuples, optional
+        List of marker pairs in the form (start marker, end marker) to define the arcs of the line to filter out the arc quadrupoles and sextupoles. 
+        If not provided, the arc quadrupoles and sextupoles must be identified using the respective regex patterns.
 
     Returns
     -------
@@ -370,23 +368,30 @@ def apply_girder_misalignments(line, seed, sigmas, attrs, switch_name=None, line
     """
     if line_table is None:
         line_table = line.get_table()
-    # --------------- Filtering out arc quadrupoles and sextupoles --------------- #
-    # ----------- based on the provided regex patterns or marker pairs ----------- #
-    if marker_pairs_arcquads is None:
-        ttarcquad = find_elements(tt=line_table, pattern=arcquads_regex, element_type='Quadrupole')
-    else:
-        ttarcquad = find_elements(tt=line_table, marker_pairs=marker_pairs_arcquads, element_type='Quadrupole')
 
-    if marker_pairs_arcsexts is None:
-        ttarcsext = find_elements(tt=line_table, pattern=arcsexts_regex, element_type='Sextupole')
+    # Validating that exactly one filtering method (regex patterns or marker pairs) is provided for both arc quadrupoles and sextupoles
+    if (arcquads_regex is None) == (marker_pairs_arcs is None):
+        raise ValueError("For arc quadrupoles, specify exactly one of 'arcquads_regex' or 'marker_pairs_arcs'.")
+    if (arcsexts_regex is None) == (marker_pairs_arcs is None):
+        raise ValueError("For arc sextupoles, specify exactly one of 'arcsexts_regex' or 'marker_pairs_arcs'.")
+    
+    # Filtering out arc quadrupoles and sextupoles based on the provided regex patterns or marker pairs
+    if arcquads_regex is not None:
+        ttarcquad = find_elements(tt=line_table, pattern=arcquads_regex, element_type='Quadrupole') # filter by regex pattern
     else:
-        ttarcsext = find_elements(tt=line_table, marker_pairs=marker_pairs_arcsexts, element_type='Sextupole')
-    # ---------------------------------------------------------------------------- #
+        ttarcquad = find_elements(tt=line_table, marker_pairs=marker_pairs_arcs, element_type='Quadrupole') # filter by marker pairs
+
+    if arcsexts_regex is not None:
+        ttarcsext = find_elements(tt=line_table, pattern=arcsexts_regex, element_type='Sextupole') # filter by regex pattern
+    else:
+        ttarcsext = find_elements(tt=line_table, marker_pairs=marker_pairs_arcs, element_type='Sextupole') # filter by marker pairs
+
+    
     groups = _group_arc_elements_in_girders(line_table, ttarcquad.name, 
                                             element_types=['Sextupole'], allowed_names=ttarcsext.name)
 
-    # All elements of the group share the same girder, so they get the same misalignment. 
-    # Generate all misalignements for all girders at once, and then apply them group by group.
+    # All elements of the group share the same girder, so they get the same misalignment 
+    # Generate all misalignements for all girders at once, and then apply them group by group
     rgen = np.random.RandomState(seed)
     girder_vals = np.array([_truncated_normal(rgen, len(groups), s, nsigma=2.5) for s in sigmas])
     
@@ -407,7 +412,8 @@ def generate_monitor_misalignments(line, line_table, pattern='bpm', element_type
                                    attrs=['shift_x', 'shift_y', 'rot_s_rad']):
     """
     Generate a dictionary with the misalignments and rotations of the monitors.
-    The assumption is that the monitors are attached to the quadrupoles, so they inherit the misalignments/rotations of the quadrupoles (which themselves may be placed on top of a girder).
+    The assumption is that the monitors are attached to the quadrupoles, 
+    so they inherit the misalignments/rotations of the quadrupoles (which themselves may be placed on top of a girder).
 
     Parameters
     ----------
@@ -444,8 +450,11 @@ def generate_monitor_misalignments(line, line_table, pattern='bpm', element_type
 
 def apply_monitor_misalignments(monitor_alignment, seed, sigmas, nsigma=2.5):
     """
-    Generate additional monitor misalignments and rotations that are added on top of the misalignments inherited from the quadrupoles already stored in the monitor alignment dictionary.
-    The additional misalignments are generated based on the truncated Gaussian model, with the specified standard deviations (sigmas) and truncation at nsigma*sigma.
+    Generate additional monitor misalignments and rotations that are added on top of the misalignments 
+    inherited from the quadrupoles already stored in the monitor alignment dictionary.
+    The additional misalignments are generated based on the truncated Gaussian model, 
+    with the specified standard deviations (sigmas) and truncation at nsigma*sigma.
+    
     Parameters
     ----------
     monitor_alignment : dict
@@ -575,8 +584,10 @@ def create_elements_switch(line, line_table, switch_name, pattern=None, marker_p
 
 def install_orbit_correctors(line, elements, prefix=('hcor_', 'vcor_')):
     """
-    Install horizontal and vertical orbit correctors at the specified elements in the line.
-
+    Install horizontal and vertical orbit correctors (dipole kickers) at the specified elements in the line, 
+    as long as no orbit correctors are already present at those elements. 
+    The correctors are implemented as Multipole elements with zero strength.
+    
     Parameters
     ----------
     line : xtrack.Line
@@ -591,7 +602,7 @@ def install_orbit_correctors(line, elements, prefix=('hcor_', 'vcor_')):
     None
         The function modifies the line in place by adding the correctors.
     """
-    # need to add note that correctors get installed to elements without correctors attached to them
+
     tt = line.get_table()
 
     for element in elements:
@@ -639,7 +650,8 @@ def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_v
         Cutoff for small singular values (relative to the largest singular value).
         Singular values smaller than rcond are considered zero.
     n_micado : int, optional
-        If n_micado is not None, the MICADO algorithm is used for the correction. 
+        The default is None, which means that SVD is used for the correction.
+        If n_micado is provided, the MICADO algorithm is used for the correction. 
         In that case, the number of correctors to be used is given by n_micado.
     corrector_limits_x : tuple of float, optional
         Limits for the horizontal corrector strengths. If not None, it should be a tuple of two arrays 
@@ -675,8 +687,6 @@ def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_v
         Kick values of the vertical correctors.
     """
 
-    # need a condition to run either SVD or MICADO to prevent wrong parameter input?
-
     orbit_correction = line.correct_trajectory(twiss_table=twiss_table, monitor_alignment=monitor_alignment, corrector_limits_x=corrector_limits_x, corrector_limits_y=corrector_limits_y, run=False)
     
     x_sv = orbit_correction.x_correction.singular_values
@@ -709,7 +719,8 @@ def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_v
 
 def add_correctors(line, element_names, type='normal', order=1,  switch_name=None):
     """
-    Add a corrector to the specified elements. The corrector can be either normal (i.e., horizontal or vertical) or skew, and of any order (e.g., dipole, quadrupole, sextupole, etc.).
+    Add a corrector to the specified elements by creating a variable in the line.
+    The corrector can be either normal or skew, and of any order (e.g., dipole, quadrupole, sextupole, etc.).
 
     Parameters
     ----------
