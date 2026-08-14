@@ -628,7 +628,7 @@ def install_orbit_correctors(line, elements, prefix=('hcor_', 'vcor_')):
 
 
 def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_vals=None, rcond=None, n_micado=None, 
-                           corrector_limits_x=None, corrector_limits_y=None,  ds_thread=5000, rcond_short=1e-7, rcond_long=1e-7):
+                           corr_limit=None, ds_thread=5000, rcond_short=1e-7, rcond_long=1e-7):
     """
     Perform orbit correction, using the standard correct_trajectory method in Xsuite. However, if the closed orbit search 
     fails due to the presence of strong lattice perturbations, the function falls back to the threading method, 
@@ -653,14 +653,9 @@ def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_v
         The default is None, which means that SVD is used for the correction.
         If n_micado is provided, the MICADO algorithm is used for the correction. 
         In that case, the number of correctors to be used is given by n_micado.
-    corrector_limits_x : tuple of float, optional
-        Limits for the horizontal corrector strengths. If not None, it should be a tuple of two arrays 
-        (lower_limits, upper_limits) with the same length as the number of horizontal correctors. 
-        If None, no limits are applied.
-    corrector_limits_y : tuple of float, optional
-        Limits for the vertical corrector strengths. If not None, it should be a tuple of two arrays 
-        (lower_limits, upper_limits) with the same length as the number of vertical correctors. 
-        If None, no limits are applied.
+    corr_limit : float, optional
+        Limit for the corrector strengths. If None, no limits are applied. If not None, it should be a float value, 
+        and the corrector strengths will be limited to the range [-corr_limit, corr_limit].
     ds_thread : float, optional
         Step size for the threading method. This is the length of the portion added at each iteration. 
         A smaller value can lead to a more stable correction but longer correction time, 
@@ -687,24 +682,39 @@ def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_v
         Kick values of the vertical correctors.
     """
 
+    if corr_limit is None:
+        corrector_limits_x = None
+        corrector_limits_y = None
+    else: 
+        # if not None, corrector_limits_x,y should be a tuple of two arrays (lower_limits, upper_limits) with the same length as the number of H,V correctors
+        corrector_limits_x = (-corr_limit*np.ones(len(line.steering_correctors_x)), corr_limit*np.ones(len(line.steering_correctors_x)))
+        corrector_limits_y = (-corr_limit*np.ones(len(line.steering_correctors_y)), corr_limit*np.ones(len(line.steering_correctors_y)))
+
+    # Create the orbit correction object
     orbit_correction = line.correct_trajectory(twiss_table=twiss_table, monitor_alignment=monitor_alignment, corrector_limits_x=corrector_limits_x, corrector_limits_y=corrector_limits_y, run=False)
     
+    # Access the singular values
     x_sv = orbit_correction.x_correction.singular_values
     y_sv = orbit_correction.y_correction.singular_values
 
+    # Determine the number of singular values to use for the correction
     if num_sing_vals is None:
         n_sv = (len(x_sv), len(y_sv))
     else:
         n_sv = (num_sing_vals, num_sing_vals)
 
+    # Run the orbit correction, using SVD or MICADO depending on the input parameters
     try: 
         orbit_correction.correct(n_singular_values=n_sv, rcond=rcond, n_micado=n_micado, delta0=0)
         
     except:
+        # If the standard correction fails, we fall back to the threading method, 
+        # which tries to correct the orbit even in the presence of strong lattice perturbations
         print('Starting orbit correction with threading method...')
         orbit_correction.thread(ds_thread=ds_thread, rcond_short=rcond_short, rcond_long=rcond_long)
         orbit_correction.correct(n_singular_values=n_sv, rcond=rcond, n_micado=n_micado, delta0=0)
 
+    # Access the kick values of the correctors
     kicks_x = orbit_correction.x_correction.get_kick_values()
     kicks_y = orbit_correction.y_correction.get_kick_values()
     

@@ -1,0 +1,49 @@
+ARC_MARKERS:
+('end_ds_start_arc_ipa', 'end_arc_start_ds_ipb')
+('end_ds_start_arc_ipb', 'end_arc_start_ds_ipd')
+('end_ds_start_arc_ipd', 'end_arc_start_ds_ipf')
+('end_ds_start_arc_ipf', 'end_arc_start_ds_ipg')
+('end_ds_start_arc_ipg', 'end_arc_start_ds_iph')
+('end_ds_start_arc_iph', 'end_arc_start_ds_ipj')
+('end_ds_start_arc_ipj', 'end_arc_start_ds_ipl')
+('end_ds_start_arc_ipl', 'end_arc_start_ds_ipa')
+
+DS_MARKERS:
+('end_straight_start_ds_ipa', 'end_ds_start_arc_ipa')
+('end_arc_start_ds_ipb', 'end_ds_start_straight_ipb')
+('end_straight_start_ds_ipb', 'end_ds_start_arc_ipb')
+('end_arc_start_ds_ipd', 'end_ds_start_straight_ipd')
+('end_straight_start_ds_ipd', 'end_ds_start_arc_ipd')
+('end_arc_start_ds_ipf', 'end_ds_start_straight_ipf')
+('end_straight_start_ds_ipf', 'end_ds_start_arc_ipf')
+('end_arc_start_ds_ipg', 'end_ds_start_straight_ipg')
+('end_straight_start_ds_ipg', 'end_ds_start_arc_ipg')
+('end_arc_start_ds_iph', 'end_ds_start_straight_iph')
+('end_straight_start_ds_iph', 'end_ds_start_arc_iph')
+('end_arc_start_ds_ipj', 'end_ds_start_straight_ipj')
+('end_straight_start_ds_ipj', 'end_ds_start_arc_ipj')
+('end_arc_start_ds_ipl', 'end_ds_start_straight_ipl')
+('end_straight_start_ds_ipl', 'end_ds_start_arc_ipl')
+('end_arc_start_ds_ipa', 'end_ds_start_straight_ipa')
+
+STRAIGHT_MARKERS:
+('end_ds_start_straight_ipb', 'end_straight_start_ds_ipb')
+('end_ds_start_straight_ipd', 'end_straight_start_ds_ipd')
+('end_ds_start_straight_ipf', 'end_straight_start_ds_ipf')
+('end_ds_start_straight_ipg', 'end_straight_start_ds_ipg')
+('end_ds_start_straight_iph', 'end_straight_start_ds_iph')
+('end_ds_start_straight_ipj', 'end_straight_start_ds_ipj')
+('end_ds_start_straight_ipl', 'end_straight_start_ds_ipl')
+('end_ds_start_straight_ipa', 'end_straight_start_ds_ipa')
+
+IR_MARKERS:
+('end_ds_start_straight_ipa', 'end_straight_start_ds_ipa')
+('end_ds_start_straight_ipd', 'end_straight_start_ds_ipd')
+('end_ds_start_straight_ipg', 'end_straight_start_ds_ipg')
+('end_ds_start_straight_ipj', 'end_straight_start_ds_ipj')
+
+TR_MARKERS:
+('end_ds_start_straight_ipb', 'end_straight_start_ds_ipb')
+('end_ds_start_straight_ipf', 'end_straight_start_ds_ipf')
+('end_ds_start_straight_iph', 'end_straight_start_ds_iph')
+('end_ds_start_straight_ipl', 'end_straight_start_ds_ipl')
