@@ -18,8 +18,8 @@ The helper functions needed to build the imperfections model are found inside th
 
 The procedure to follow is:
 1. Requirements for the imperfections model:
-- **Design an optimal BPM & corrector layout** e.g. BPMs attached to quadrupoles, horizontal and vertical orbit correctors (dipole kickers) at  quadrupoles, normal and skew optics correctors (quadrupole trims) at quadrupoles and sextupoles
-- **Choose error tolerances** for the alignment of elements in the arcs and straight sections
+- **Design an optimal BPM & corrector layout**, e.g. BPMs attached to quadrupoles, horizontal and vertical orbit correctors (dipole kickers) at  quadrupoles, normal and skew optics correctors (quadrupole trims) at quadrupoles and sextupoles.
+- **Choose error tolerances** for the alignment of elements in the arcs and straight sections.
 
 2. **Apply imperfections** to the chosen elements in the lattice using regular-expression or marker-based filtering. The error configurations can be controlled through switch variables. The lattices with imperfections switches are found inside the folder: `lattices/lattices_with_imperfections`.
 
