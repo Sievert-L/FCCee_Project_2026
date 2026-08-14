@@ -17,16 +17,15 @@ of the dipoles, quadrupoles, and sextupoles in the arcs and the straight section
 The helper functions needed to build the imperfections model are found inside the `helpers_for_imperfections_model` file. Example usage is provided in the code scripts stored inside the folders for the respective machine.
 
 The procedure to follow is:
-1. Requirements for the imperfections model
-**Design an optimal BPM & corrector layout**: e.g. BPMs attached to quadrupoles, horizontal and vertical orbit correctors (dipole kickers) at  quadrupoles, normal and skew optics correctors (quadrupole trims) at quadrupoles and sextupoles
-**Choose error tolerances**: for the alignment of elements in the arcs and straight sections
+1. Requirements for the imperfections model:
+- **Design an optimal BPM & corrector layout** e.g. BPMs attached to quadrupoles, horizontal and vertical orbit correctors (dipole kickers) at  quadrupoles, normal and skew optics correctors (quadrupole trims) at quadrupoles and sextupoles
+- **Choose error tolerances** for the alignment of elements in the arcs and straight sections
 
-2. **Apply imperfections** to the chosen elements in the lattice using regular-expression or marker-based filtering. The error configurations can be controlled through switch variables. The lattices with imperfections switches are found inside the folder:
-`lattices/lattices_with_imperfections`
+2. **Apply imperfections** to the chosen elements in the lattice using regular-expression or marker-based filtering. The error configurations can be controlled through switch variables. The lattices with imperfections switches are found inside the folder: `lattices/lattices_with_imperfections`.
 
-3. **Apply a global orbit correction routine** using SVD or MICADO and threading. A functionality for a gradual ramping of the sextupole strengths is implemented. The orbit-corrected lattices are found inside the folder: `lattices/lattices_with_corrected_imperfections/01_orbit_corrected_only`. The response matrices are stored inside the `helper_files_for_RM` folder, which also contains the scripts used to generate them.
+3. **Apply a global orbit correction routine** using SVD or MICADO and threading. A functionality for a gradual ramping of the sextupole strengths is implemented. The orbit-corrected lattices are found inside the folder: `lattices/lattices_with_corrected_imperfections/01_orbit_corrected_only`. 
 
-4. **Apply a global optics correction routine** using the response matrix approach, targeting the beta-beating, dispersion, phase advance, coupling, etc. The files needed to generate the optics response matrices are found inside the folder `helpers_for_RM_generation`. The lattices with corrected imperfections are stored inside `lattices/lattices_with_corrected_imperfections/02_orbit_and_optics_corrected`.
+4. **Apply a global optics correction routine** using the response matrix approach, targeting the beta-beating, dispersion, phase advance, coupling, etc. The response matrices are stored inside the `helpers_for_RM_generation` folder, which also contains the scripts used to generate them. The lattices with corrected imperfections are stored inside the folder: `lattices/lattices_with_corrected_imperfections/02_orbit_and_optics_corrected`.
 
 5. **Investigate the impact of beam-beam effects** in lattices with corrected imperfections.
 
