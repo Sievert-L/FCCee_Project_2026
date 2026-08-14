@@ -2,9 +2,9 @@
 ## Master's Project 2026
 ### Lara Sophie Sievert (Supervisors: Dr. Tirsi Prebibaj, Dr. Tatiana Pieloni, Prof. Dr. Mike Seidel)
 
-#### Development of an imperfections model of the FCC-ee for the LCC lattice at the Z pole and the design of a correction scheme to generate lattices with corrected imperfections, which are used to study the impact of beam-beam interactions.
+#### Development of an imperfections model in Xsuite and the design of a correction scheme to generate lattices with corrected imperfections, which are used to study the impact of beam-beam interactions.
 
-The generic implementation of this model (in Xsuite) allows for it to be extended to all the other FCC-ee energies as well as other accelerators.
+My Master's thesis titled **Imperfections Model of the FCC-ee with Corrections and Beam-Beam Effects** focussed on the FCC-ee for the LCC lattice at the Z pole, but the generic implementation of this model in Xsuite allows for it to be extended to all the other FCC-ee energies as well as other accelerators.
 The chosen error tolerances for the applied imperfections can easily be modified.
 
 The applied imperfections include:
@@ -14,15 +14,21 @@ The applied imperfections include:
 
 of the dipoles, quadrupoles, and sextupoles in the arcs and the straight sections.
 
-The helper functions needed to build the imperfections model are stored inside the `helper_functions` folder. Example usage is provided in the code scripts stored inside the `create_imperfections_model_with_corrections` folder.
+The helper functions needed to build the imperfections model are found inside the `helpers_for_imperfections_model` file. Example usage is provided in the code scripts stored inside the folders for the respective machine.
 
 The procedure to follow is:
-1. **Apply imperfections** to the chosen elements in the lattice using regular-expression based filtering. The error configurations can be controlled through switch variables. The lattices with imperfections switches are found inside the folder:
-`lattices/choose_line_version/lattices_with_imperfections`
+1. Requirements for the imperfections model
+**Design an optimal BPM & corrector layout**: e.g. BPMs attached to quadrupoles, horizontal and vertical orbit correctors (dipole kickers) at  quadrupoles, normal and skew optics correctors (quadrupole trims) at quadrupoles and sextupoles
+**Choose error tolerances**: for the alignment of elements in the arcs and straight sections
 
-2. **Apply a global orbit and optics correction scheme** (using the response matrix approach). The correction routine generates lattices with corrected imperfections, which are found inside the folder: `lattices/choose_line_version/lattices_with_corrected_imperfections/03_orbit_and_optics_corrected_with_radiation_FINAL`. The response matrices are stored inside the `helper_files_for_RM` folder, which also contains the scripts used to generate them.
+2. **Apply imperfections** to the chosen elements in the lattice using regular-expression or marker-based filtering. The error configurations can be controlled through switch variables. The lattices with imperfections switches are found inside the folder:
+`lattices/lattices_with_imperfections`
 
-3. **Investigate the impact of beam-beam effects** in lattices with corrected imperfections using the scripts provided inside the `install_beambeam_effects` folder.
+3. **Apply a global orbit correction routine** using SVD or MICADO and threading. A functionality for a gradual ramping of the sextupole strengths is implemented. The orbit-corrected lattices are found inside the folder: `lattices/lattices_with_corrected_imperfections/01_orbit_corrected_only`. The response matrices are stored inside the `helper_files_for_RM` folder, which also contains the scripts used to generate them.
+
+4. **Apply a global optics correction routine** using the response matrix approach, targeting the beta-beating, dispersion, phase advance, coupling, etc. The files needed to generate the optics response matrices are found inside the folder `helpers_for_RM_generation`. The lattices with corrected imperfections are stored inside `lattices/lattices_with_corrected_imperfections/02_orbit_and_optics_corrected`.
+
+5. **Investigate the impact of beam-beam effects** in lattices with corrected imperfections.
 
 For questions, contact <lara.sophie.sievert@cern.ch>.
 
