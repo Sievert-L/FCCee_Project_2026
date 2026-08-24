@@ -4,7 +4,7 @@
 
 #### Development of an imperfections model in Xsuite and the design of a correction scheme to generate lattices with corrected imperfections, which are used to study the impact of beam-beam interactions.
 
-My Master's thesis titled **Imperfections Model of the FCC-ee with Corrections and Beam-Beam Effects** focussed on the FCC-ee for the LCC lattice at the Z pole, but the generic implementation of this model in Xsuite allows for it to be extended to all the other FCC-ee energies as well as other accelerators.
+My Master's thesis titled **Imperfections Model of the FCC-ee with Corrections and Beam-Beam Effects** focussed on the FCC-ee for the LCC lattice at the Z pole, but the generic implementation of this model in Xsuite allows for it to be extended to other FCC-ee energies as well as other accelerators.
 The chosen error tolerances for the applied imperfections can easily be modified.
 
 The applied imperfections include:
