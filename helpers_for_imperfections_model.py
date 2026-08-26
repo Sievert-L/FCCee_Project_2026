@@ -599,32 +599,57 @@ def install_orbit_correctors(line, elements, prefix=('hcor_', 'vcor_')):
     
     Returns
     -------
-    None
-        The function modifies the line in place by adding the correctors.
+    tuple of lists
+        Two lists containing the names of the horizontal and vertical orbit correctors, respectively.
+    
     """
 
+    env = line.env
     tt = line.get_table()
 
+    hprefix, vprefix = prefix
+
+    inserts = []
+    hcor_names = []
+    vcor_names = []
+
     for element in elements:
-        s_insert = tt.rows[element].s[0]
+        hcor_name = f'{hprefix}{element}'
+        vcor_name = f'{vprefix}{element}'
 
-        # Create variables
-        line.vars[f'knl_{element}'] = 0
-        line.vars[f'ksl_{element}'] = 0
+        s_insert = tt['s_start', element]
 
-        # Corrector names
-        hcor_name = f'{prefix[0]}{element}'
-        vcor_name = f'{prefix[1]}{element}'
+        # Make sure the variables exist
+        if f'knl_{element}' not in line.vars:
+            line.vars[f'knl_{element}'] = 0.0
 
-        # Horizontal corrector
+        if f'ksl_{element}' not in line.vars:
+            line.vars[f'ksl_{element}'] = 0.0
+
+        # Create horizontal and vertical correctors at the specified location if they don't already exist
         if hcor_name not in line.element_dict:
-            line.insert(hcor_name, xt.Multipole(knl=np.array([0.])), at=s_insert)
-            line[hcor_name].knl = line.vars[f'knl_{element}']
+            env.new(hcor_name, xt.Multipole, knl=[0.])
+            inserts.append(env.place(hcor_name, at=s_insert))
 
-        # Vertical corrector
         if vcor_name not in line.element_dict:
-            line.insert(vcor_name, xt.Multipole(ksl=np.array([0.])), at=s_insert)
-            line[vcor_name].ksl = line.vars[f'ksl_{element}']
+            env.new(vcor_name, xt.Multipole, ksl=[0.])
+            inserts.append(env.place(vcor_name, at=s_insert))
+
+        hcor_names.append(hcor_name)
+        vcor_names.append(vcor_name)
+
+    if inserts:
+        line.insert(inserts)
+
+    # Connect correctors to variables
+    for element in elements:
+        hcor_name = f'{hprefix}{element}'
+        vcor_name = f'{vprefix}{element}'
+
+        line.element_refs[hcor_name].knl[0] = line.vars[f'knl_{element}']
+        line.element_refs[vcor_name].ksl[0] = line.vars[f'ksl_{element}']
+
+    return hcor_names, vcor_names
 
 
 def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_vals=None, rcond=None, n_micado=None, 
