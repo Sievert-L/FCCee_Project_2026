@@ -1,4 +1,4 @@
-# Xsuite Imperfections Model with Corrections and Beam-Beam Effects
+# Imperfections Model of the FCC-ee with Corrections and Beam-Beam Effects
 ## Lara Sophie Sievert & Tirsi Prebibaj
 ### Master's Project 2026 
 
