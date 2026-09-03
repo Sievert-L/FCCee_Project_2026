@@ -1,0 +1,45 @@
+# ============================
+# HTCondor submission file
+# ============================
+
+# To be modified for each submission:
+# executable
+# number of CPUs
+# job flavour or max run time
+# seed file 
+# log folder name (remember to create it before submitting! using mkdir -p logs_optics_correction)
+# in that case, the copying of the logs in executable file is no longer needed
+
+log_folder = logs_optics_correction
+
+executable            = /afs/cern.ch/user/l/lsievert/htcondor_submissions/executable_optics_correction.sh
+arguments             = $(seed)
+
+# Input files to transfer
+transfer_input_files  = /afs/cern.ch/user/l/lsievert/htcondor_submissions/fcc-2026-afs.tar.gz
+
+# Output and log
+output = $(log_folder)/out_$(seed).txt
+error  = $(log_folder)/err_$(seed).txt
+log    = log.txt
+
+# Resources
+request_CPUs          = 4
+
+# One can either specify the Max Run time of the simulation in seconds or can use some of the keywords
+# espresso = 20 minutes
+# microcentury = 1 hour
+# longlunch = 2 hours
+# workday = 8 hours
+# tomorrow = 1 day
+# testmatch = 3 days
+# nextweek = 1 week
+
+#+JobFlavour           = "espresso"
++MaxRuntime           = 1800
+
+# Queue jobs for each seed
+#queue seed from successful_seeds_all.txt
+queue seed from seeds1-100.txt
+#queue seed from seeds_test.txt
+#queue seed from seeds_optics.txt
