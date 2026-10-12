@@ -1,7 +1,9 @@
 import warnings
 import numpy as np
 import xtrack as xt
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
+import re
+from math import factorial
 
 ##############################################
 # Helpers for applying imperfections
@@ -39,60 +41,51 @@ def find_elements(tt, pattern=None, marker_pairs=None, element_type=None, except
     if pattern is not None and marker_pairs is not None:
         raise ValueError("Provide either 'pattern' (for regex-based filtering) or 'marker_pairs' (for marker-based filtering), not both!")
     
-    # --------------------------- Regex-based filtering --------------------------- #
-    if pattern is not None: 
+    if pattern is not None: # Regex-based filtering
         patterns = pattern if isinstance(pattern, (list, tuple)) else [pattern]
         tt_element = sum((tt.rows[f'{p}.*'] for p in patterns), tt.rows[[]])
 
-    # -------------------------- Marker-based filtering -------------------------- #
-    elif marker_pairs is not None: 
+    elif marker_pairs is not None: # Marker-based filtering
 
         # If marker_pairs is a list of several marker-pair lists, flatten it
         if marker_pairs and isinstance(marker_pairs[0][0], (list, tuple)):
             marker_pairs = [pair for group in marker_pairs for pair in group]
 
         mask = np.zeros(len(tt), dtype=bool)
-
         for start_marker, end_marker in marker_pairs:
             s_start = tt.rows[tt.name == start_marker].s
             s_end   = tt.rows[tt.name == end_marker].s
-
-            if s_start < s_end:
-                # normal section: include start, exclude end
+            if s_start < s_end: # normal section: include start, exclude end
                 mask |= (tt.s >= s_start) & (tt.s < s_end)
-            else:
-                # wraparound section: include start, exclude end
+            else: # wraparound section: include start, exclude end
                 mask |= (tt.s >= s_start) | (tt.s < s_end)
-
         tt_element = tt.rows[mask]
 
     else:
         raise ValueError("Need to specify either 'pattern' (for regex-based filtering) or 'marker_pairs' (for marker-based filtering)!")
 
-    # -------------------- Filter by element type if provided -------------------- #
+    # Filter by element type if provided
     if element_type is not None: 
         tt_element = tt_element.rows[tt_element.element_type == element_type]
 
-    # ------- Exclude elements based on except_pattern and/or except_names ------- #
+    # Exclude elements based on except_pattern and/or except_names
     excluded_elements = []
-
-    if except_pattern is not None:
+    if except_pattern is not None: 
         patterns = except_pattern if isinstance(except_pattern, (list, tuple)) else [except_pattern]   
         tt_excluded = sum((tt.rows[f'{p}.*'] for p in patterns), tt.rows[[]])
         excluded_elements.extend(tt_excluded.name)
-
-    if except_names is not None:
+    if except_names is not None:  # Exclude elements based on except_names
         names = except_names if isinstance(except_names, (list, tuple, np.ndarray)) else [except_names]
         excluded_elements.extend(names)
-
     if len(excluded_elements) > 0:
         tt_element = tt_element.rows[~np.isin(tt_element.name, excluded_elements)]
 
+    # Filter apertures
     if filter_aper:
         tt_element = tt_element.rows['.*(?<!_aper)$']
 
     if len(tt_element) == 0:
-            warnings.warn("Warning: No elements matched.")
+        warnings.warn("Warning: No elements matched.")
 
     return tt_element
 
@@ -127,8 +120,79 @@ def _truncated_normal(rgen, size, sigma, nsigma):
     return x
 
 
+def _parse_multipole_attr(attr):
+    """
+    A function to translate a multipole attribute name (e.g., 'b2', 'a4') 
+    into the corresponding Xsuite array name and index. For example:
+        'b2' -> ('knl', 1)  
+        'a4' -> ('ksl', 3)  
+        None if not a multipole label.
+
+    Parameters
+    ----------
+    attr : str
+        The multipole attribute name to parse (e.g., 'b2', 'a4').
+    
+    Returns
+    -------
+    tuple or None
+        A tuple containing the array name ('knl' or 'ksl') and the index (0-based) if the attribute is a multipole label.
+        Returns None if the attribute is not a multipole label.
+    """
+    match = re.fullmatch(r'([ba])(\d+)', attr)
+    if match is None:
+        return None
+    array_name = 'knl' if match.group(1) == 'b' else 'ksl'
+    n = int(match.group(2)) - 1
+    return array_name, n
+
+
+def _main_field(elem, elem_ref):
+    """
+    A function to determine the main field of a magnet element by checking its normal strengths (k0, k1, k2, k3).
+
+    Parameters
+    ----------
+    elem : xtrack.Element
+        The magnet element to analyze.
+    elem_ref : xtrack.Element
+        The reference element for the magnet.
+
+    Returns
+    -------
+    tuple
+        A tuple containing the main field parameters (n0, k_main_expr_or_value, length).
+        n0 is the lowest index with a non-zero normal strength (0 = dipole, 1 = quadrupole, 
+        2 = sextupole, 3 = octupole).
+    """
+    length = getattr(elem_ref, 'length')._value
+
+    _MAIN_ORDER_ATTR = {0: 'k0', 1: 'k1', 2: 'k2', 3: 'k3', 4: 'k4'}
+    for n0 in range(4):
+        attr = _MAIN_ORDER_ATTR[n0]
+        if not hasattr(elem, attr):
+            continue
+
+        ref = getattr(elem_ref, attr)
+        expr = ref._expr
+        value = ref._value
+
+        if value == 'from_h':                      # same handling as your k0 case
+            angle = getattr(elem_ref, 'angle')._value
+            value = angle / length
+            expr = None                            # numeric fallback, no link to h
+
+        if value is not None and value != 0:
+            # Keep in mind that: if k driven by a knob that currently evaluates to 0
+            # it will fail to detect the main field... to be improved. 
+            return n0, (expr if expr is not None else value), length
+
+    return None, None, length
+
+
 def _apply_random_values(element_names, line, attrs, vals,
-                         switch_name=None, wrt_current_expr = False, apply_relative=False):
+                         switch_name=None, wrt_current_expr = False, apply_relative=False,
+                         reference_radius=1e-2):
     """
     A function to apply random values (vals) to element attributes (attrs) 
     for a specific element group (element_names).
@@ -151,6 +215,8 @@ def _apply_random_values(element_names, line, attrs, vals,
     apply_relative : bool, optional
         If True, the random values are applied as a relative change (i.e., multiplied by the existing value). 
         This is only relevant if wrt_current_expr is True.
+    reference_radius : float, optional
+        Reference radius for scaling higher order multipole attributes. Default is 1e-2 (10 mm).
     
     Returns
     -------
@@ -167,15 +233,43 @@ def _apply_random_values(element_names, line, attrs, vals,
         elem_ref = line.element_refs[name]
         for a, val in zip(attrs, v):
 
+            # Check if higher order multipole attributes and treat them separately
+            spec = _parse_multipole_attr(a)
+            if spec is not None:
+                array_name, n = spec # e.g. ('knl', 1) for b2, ('ksl', 3) for a4, etc.
+                n0, k_main, length = _main_field(elem, elem_ref)
+                if n0 is None:
+                    print(f"Skipping {name}: no non-zero main field found.")
+                    continue
+                array_ref = getattr(elem_ref, array_name)
+                if n >= len(getattr(elem, array_name)):
+                    raise ValueError(
+                        f"{name}: {array_name} has length "
+                        f"{len(getattr(elem, array_name))}, need index {n}. "
+                        f"Rebuild the element with a higher order.")
+
+                # knl[n] = n!/n0! * (k_n0 * L) * b_{n+1} * R_ref^(n0-n)
+                scale = factorial(n) / factorial(n0) * reference_radius ** (n0 - n)
+                increment = scale * length * k_main * val
+
+                if switch_name is not None:
+                    increment = increment * line.vars[switch_name]
+
+                current = array_ref[n]._expr
+                if current is None:
+                    current = array_ref[n]._value
+
+                array_ref[n] = current + increment
+                continue
+
             if wrt_current_expr==False: # <-- to apply the value/expression directly, without being added to the existing one
                 setattr(elem, a, val*line.vars[switch_name] if switch_name is not None else val)
             
             elif wrt_current_expr: # <-- to apply the value/expression as a relative change, i.e. added to the existing one
-                # Take current expression
-                current = getattr(elem_ref, a)._expr
+                current = getattr(elem_ref, a)._expr # <-- Take current expression
                 if current is None: # <-- to handle the case in which the attribute has no expression, just a value
                     current = getattr(elem_ref, a)._value
-                    if current == 'from_h': # <-- if k0 is set to the string value 'from_h', we compute its numerical value via angle/length
+                    if current == 'from_h': # <-- only for dipoles; if k0 is set to the string value 'from_h', we compute its numerical value via angle/length
                         angle = getattr(elem_ref, 'angle')._value
                         length = getattr(elem_ref, 'length')._value
                         current = angle / length
@@ -250,7 +344,7 @@ def _group_arc_elements_in_girders(tt, arcquad_names, element_types=None, allowe
 def apply_errors(line, seed, sigmas, attrs, pattern=None, marker_pairs=None, switch_name=None,
                  line_table=None, element_type=None, filter_aper=True,
                  nsigma=2.5, wrt_current_expr=False, apply_relative=False,
-                 vals=None, element_names=None):
+                 vals=None, element_names=None, reference_radius=1e-2):
     """
     Apply random errors (field errors, misalignments, rotations) to 
     elements in the line based on either the provided regex patterns or marker pairs. 
@@ -293,6 +387,8 @@ def apply_errors(line, seed, sigmas, attrs, pattern=None, marker_pairs=None, swi
         If provided, the random values are not generated, and the seed, sigmas, and nsigma parameters are ignored.
     element_names : list of str, optional
         List of element names to apply imperfections to. If provided, the pattern parameter and marker pairs are ignored.
+    reference_radius : float, optional
+        Reference radius for scaling higher order multipole attributes. Default is 1e-2 (10 mm).
     
     Returns
     -------
@@ -322,7 +418,8 @@ def apply_errors(line, seed, sigmas, attrs, pattern=None, marker_pairs=None, swi
     # Apply the random values to the selected elements
     _apply_random_values(element_names, line, attrs, vals,
                          switch_name=switch_name, 
-                         wrt_current_expr=wrt_current_expr, apply_relative=apply_relative)     
+                         wrt_current_expr=wrt_current_expr, apply_relative=apply_relative,
+                         reference_radius=reference_radius)     
     
     return element_names
 
@@ -769,6 +866,11 @@ def add_correctors(line, element_names, type='normal', order=1,  switch_name=Non
         Order of the corrector to add (e.g., 0 for dipole corrector, 1 for quadrupole corrector, etc.). Default is 1.
     switch_name : str, optional
         Name of the switch variable to control the corrector. If provided, the corrector will be multiplied by this switch variable.
+
+    Returns
+    -------
+    None
+        The function modifies the line in place by adding the corrector variables to the specified elements.
     """
     # Create the switch if it does not exist, or reset it to 1 if it already exists
     if switch_name is not None:
@@ -783,10 +885,12 @@ def add_correctors(line, element_names, type='normal', order=1,  switch_name=Non
 
     for element in element_names:
         line.vars[attr + str(order) + '_' + element] = 0
-        if switch_name is not None:
-            getattr(line.element_refs[element], attr)[order] = line.vars[attr + str(order) + '_' + element]*line.vars[switch_name]
-        else:
-            getattr(line.element_refs[element], attr)[order] = line.vars[attr + str(order) + '_' + element]
+
+        current = getattr(line.element_refs[element], attr)[order]._expr # <-- Take current expression
+        if current is None: # <-- to handle the case in which the attribute has no expression, just a value
+            current = getattr(line.element_refs[element], attr)[order]._value
+
+        getattr(line.element_refs[element], attr)[order] = (current + line.vars[attr + str(order) + '_' + element] * line.vars[switch_name]) if switch_name is not None else (current + line.vars[attr + str(order) + '_' + element])
 
 
 def _load_twiss(twiss, OBSERVABLES, OBSERVATION_POINTS=None):
@@ -942,7 +1046,14 @@ def compute_pseudo_inverse(R, epsilon=0.001, full_matrices=False, Tikhonov_lambd
     return R_inv, U, S, VT
 
 
-def apply_optics_correction(line, RM_inv, corr_knob_names, tw_ref, OBSERVATION_POINTS, OBSERVABLES, nloops):
+def _measurement_noise(n_points, measurement_errors, rgen, nsigma=2.5):
+    """Noise vector matching the layout of _construct_vector: one sigma per observable."""
+    return np.concatenate([_truncated_normal(rgen, n_points, s, nsigma)
+                           for s in measurement_errors])
+
+
+def apply_optics_correction(line, RM_inv, corr_knob_names, tw_ref, OBSERVATION_POINTS, OBSERVABLES, nloops,
+                            measurement_errors=None, meas_seed=None, nsigma=2.5):
     """
     Apply optics correction to the line by iteratively calculating the strength deltas 
     from the response matrix and applying them to the correctors.
@@ -963,12 +1074,28 @@ def apply_optics_correction(line, RM_inv, corr_knob_names, tw_ref, OBSERVATION_P
         List of observables to select from the twiss.
     nloops : int
         Number of correction iterations to perform.
+    measurement_errors : list of float, optional
+        Standard deviations of the absolute measurement errors to add to the measured vector, one per observable 
+        (e.g. [1e-4, 1e-4, 10e-6] for ['mux', 'muy', 'dx']). Must have the same length and ordering as OBSERVABLES.
+        If None, the correction is performed on the exact twiss values, without emulating the measurement.
+        The errors are only applied to the measured vector, not to the reference one, and they are re-generated 
+        at every iteration, so that the correction converges to the measurement noise floor.
+    meas_seed : int, optional
+        Random seed for the measurement errors, independent from the seed used for the machine imperfections.
+        Only relevant if measurement_errors is provided.
+    nsigma : float, optional
+        Number of standard deviations to truncate the normal distribution for the measurement errors.
     
     Returns
         The function modifies the line in place by applying the correction to the correctors.
     """
     tw0 = _load_twiss(tw_ref, OBSERVATION_POINTS=OBSERVATION_POINTS, OBSERVABLES=OBSERVABLES)
     vector0 = _construct_vector(tw0, OBSERVABLES=OBSERVABLES)
+
+    if measurement_errors is not None:
+        assert len(measurement_errors) == len(OBSERVABLES), \
+            "measurement_errors must have one sigma per observable"
+        rgen_meas = np.random.RandomState(meas_seed)   # created ONCE, outside the loop
     
     for i in range(nloops):
         tw_before = line.twiss(coupling_edw_teng=True, matrix_stability_tol=0.20)
@@ -979,6 +1106,11 @@ def apply_optics_correction(line, RM_inv, corr_knob_names, tw_ref, OBSERVATION_P
 
         tw1 = _load_twiss(tw_before, OBSERVATION_POINTS=OBSERVATION_POINTS, OBSERVABLES=OBSERVABLES)
         vector1 = _construct_vector(tw1, OBSERVABLES=OBSERVABLES)
+
+        # Emulate the measurement: independent noise at every iteration
+        if measurement_errors is not None:
+            vector1 = vector1 + _measurement_noise(len(tw1[OBSERVABLES[0]]),
+                                                   measurement_errors, rgen_meas, nsigma)
 
         # Create target
         target = vector0 - vector1
