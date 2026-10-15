@@ -1,8 +1,10 @@
 import warnings
+import gc # [Change 14.10.2026] used in apply_orbit_correction
 import numpy as np
 import xtrack as xt
 #import matplotlib.pyplot as plt
 import re
+import zlib
 from math import factorial
 
 ##############################################
@@ -88,6 +90,31 @@ def find_elements(tt, pattern=None, marker_pairs=None, element_type=None, except
         warnings.warn("Warning: No elements matched.")
 
     return tt_element
+
+
+def _family_rng(seed, family_name):
+    """
+    Random number generator with an independent, reproducible stream for each (seed, error family).
+    Without this, every call with the same seed restarts the same stream, so that e.g. the shift_x and 
+    the field error of the same magnet get identical normalised random numbers (fully correlated errors).
+
+    Parameters
+    ----------
+    seed : int
+        Seed of the machine realisation.
+    family_name : str or None
+        Unique name of the error family (the switch name is used). If None, falls back to RandomState(seed).
+
+    Returns
+    -------
+    np.random.RandomState
+        Random number generator for this (seed, family).
+    """
+    if family_name is None:
+        return np.random.RandomState(seed)
+    family_key = zlib.crc32(family_name.encode()) # deterministic (unlike Python's hash(), which changes between sessions)
+    sub_seed = np.random.SeedSequence([seed, family_key]).generate_state(1)[0]
+    return np.random.RandomState(sub_seed)
 
 
 def _truncated_normal(rgen, size, sigma, nsigma):
@@ -410,7 +437,7 @@ def apply_errors(line, seed, sigmas, attrs, pattern=None, marker_pairs=None, swi
 
     # Generate the random values to apply to the attributes, if not provided
     if vals is None:
-        rgen = np.random.RandomState(seed)
+        rgen = _family_rng(seed, switch_name) # independent stream per error family (switch names are unique per family)
         # The random values are generated for all elements and attributes at once
         # vals size: (len(element_names), len(attrs))
         vals = [_truncated_normal(rgen, len(element_names), s, nsigma) for s in sigmas]
@@ -489,7 +516,7 @@ def apply_girder_misalignments(line, seed, sigmas, attrs, switch_name=None, line
 
     # All elements of the group share the same girder, so they get the same misalignment 
     # Generate all misalignements for all girders at once, and then apply them group by group
-    rgen = np.random.RandomState(seed)
+    rgen = _family_rng(seed, switch_name) # independent stream per error family
     girder_vals = np.array([_truncated_normal(rgen, len(groups), s, nsigma=2.5) for s in sigmas])
     
     # Loop over all girders and apply the same misalignment to all elements in the girder (but with the same switch)
@@ -567,7 +594,7 @@ def apply_monitor_misalignments(monitor_alignment, seed, sigmas, nsigma=2.5):
     dict
         The monitor alignment dictionary with the additional misalignments applied.
     """
-    rgen = np.random.RandomState(seed)
+    rgen = _family_rng(seed, 'monitor_errors') # independent stream, not shared with the magnet errors
 
     for bpm in monitor_alignment:
         for i, attr in enumerate(monitor_alignment[bpm]):
@@ -749,8 +776,34 @@ def install_orbit_correctors(line, elements, prefix=('hcor_', 'vcor_')):
     return hcor_names, vcor_names
 
 
+def _add_bpm_noise(single_plane_correction, sigma, rgen, nsigma=2.5):
+    """
+    Add a new random BPM reading error (truncated Gaussian) at every orbit measurement of an xtrack orbit correction.
+    All orbit readings of the correction go through its _measure_position method (closed orbit at the BPMs, minus the 
+    monitor misalignments, with the BPM roll), which is wrapped here to add the noise to the returned readings.
+    Note: _measure_position is a private xtrack method (checked for xtrack 0.111-0.115).
+
+    Parameters
+    ----------
+    single_plane_correction : xtrack OrbitCorrectionSinglePlane
+        The x or y correction object of an orbit correction (orbit_correction.x_correction or .y_correction).
+    sigma : float
+        Standard deviation of the BPM reading error [m].
+    rgen : np.random.RandomState
+        Random number generator.
+    nsigma : float, optional
+        Truncation of the Gaussian distribution, in units of sigma. Default is 2.5.
+    """
+    measure_without_noise = single_plane_correction._measure_position
+    def measure_with_noise(tw_orbit=None):
+        position = measure_without_noise(tw_orbit=tw_orbit)
+        return position + _truncated_normal(rgen, len(position), sigma, nsigma)
+    single_plane_correction._measure_position = measure_with_noise
+
+
 def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_vals=None, rcond=None, n_micado=None, 
-                           corr_limit=None, ds_thread=5000, rcond_short=1e-7, rcond_long=1e-7):
+                           corr_limit=None, ds_thread=5000, rcond_short=1e-7, rcond_long=1e-7,
+                           bpm_noise=None, noise_seed=None, thread_only=False):
     """
     Perform orbit correction, using the standard correct_trajectory method in Xsuite. However, if the closed orbit search 
     fails due to the presence of strong lattice perturbations, the function falls back to the threading method, 
@@ -790,6 +843,17 @@ def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_v
         Cutoff for small singular values (relative to the largest singular value) in the threading method
         (used for the correction of the whole portion up to the end of the newly added part). 
         Singular values smaller than rcond_long are considered zero.
+    bpm_noise : float, optional
+        Standard deviation of the BPM reading error [m], re-generated at every orbit measurement (i.e. at every
+        iteration of the correction). If None, no reading error is applied. Default is None.
+        Note: the threading method builds its own internal corrections, which do not include the reading error.
+    noise_seed : int, optional
+        Seed for the BPM reading errors. Only relevant if bpm_noise is provided.
+    thread_only : bool, optional
+        If True, only the threading is performed (no closed-orbit correction). Useful for the first correction of a
+        machine whose optics is still far from the model, where the closed-orbit correction with the design response
+        matrix can diverge: correct the linear optics first, then call this function again for the closed orbit.
+        Default is False.
 
     Returns
     -------
@@ -804,6 +868,10 @@ def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_v
         Kick values of the vertical correctors.
     """
 
+    # [Change 14.10.2026] Free the objects of the previous orbit corrections: they hold large response matrices and, through the BPM-noise
+    # wrappers, reference cycles that Python frees only at a full garbage collection (otherwise ~0.3 GB more per call)
+    gc.collect()
+
     if corr_limit is None:
         corrector_limits_x = None
         corrector_limits_y = None
@@ -814,6 +882,12 @@ def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_v
 
     # Create the orbit correction object
     orbit_correction = line.correct_trajectory(twiss_table=twiss_table, monitor_alignment=monitor_alignment, corrector_limits_x=corrector_limits_x, corrector_limits_y=corrector_limits_y, run=False)
+
+    # Add the BPM reading errors (new values at every orbit measurement)
+    if bpm_noise is not None:
+        rgen_noise = np.random.RandomState(noise_seed)
+        _add_bpm_noise(orbit_correction.x_correction, bpm_noise, rgen_noise)
+        _add_bpm_noise(orbit_correction.y_correction, bpm_noise, rgen_noise)
     
     # Access the singular values
     x_sv = orbit_correction.x_correction.singular_values
@@ -824,6 +898,12 @@ def apply_orbit_correction(line, twiss_table, monitor_alignment=None, num_sing_v
         n_sv = (len(x_sv), len(y_sv))
     else:
         n_sv = (num_sing_vals, num_sing_vals)
+
+    # Only threading, if requested
+    if thread_only:
+        print('Threading only (no closed-orbit correction)...')
+        orbit_correction.thread(ds_thread=ds_thread, rcond_short=rcond_short, rcond_long=rcond_long)
+        return x_sv, y_sv, orbit_correction.x_correction.get_kick_values(), orbit_correction.y_correction.get_kick_values()
 
     # Run the orbit correction, using SVD or MICADO depending on the input parameters
     try: 
@@ -893,10 +973,11 @@ def add_correctors(line, element_names, type='normal', order=1,  switch_name=Non
         getattr(line.element_refs[element], attr)[order] = (current + line.vars[attr + str(order) + '_' + element] * line.vars[switch_name]) if switch_name is not None else (current + line.vars[attr + str(order) + '_' + element])
 
 
-def _load_twiss(twiss, OBSERVABLES, OBSERVATION_POINTS=None):
+def _load_twiss(twiss, OBSERVABLES, OBSERVATION_POINTS=None, phase_origin=None):
     '''
     Simply loads the twiss from a csv file or xtrack.Table, and selects the columns and rows 
     corresponding to the observables and observation points of interest.
+    Optionally, the phase advances (mux, muy) are re-referenced to a given element (phase_origin).
 
     Parameters
     ----------
@@ -907,6 +988,15 @@ def _load_twiss(twiss, OBSERVABLES, OBSERVATION_POINTS=None):
     OBSERVATION_POINTS : list of str, optional
         List of observation points to select from the twiss. 
         If None, all points are selected. Default is None.
+    phase_origin : str, optional
+        If given, mux and muy are re-measured from this element, as if the line started there.
+        This makes the phases consistent with a response matrix that was built on a line starting
+        at phase_origin, independently of where the present line is cycled.
+        Elements upstream of phase_origin in the table wrap by one full tune (qx, qy).
+        Only the phases depend on the starting point of the line; beta, dispersion and the
+        coupling RDTs are periodic functions and are left untouched.
+        Requires the full twiss table (not a pre-selected one), since the phase at phase_origin is needed.
+        Default is None (phases as in the input table).
 
     Returns
     -------
@@ -919,9 +1009,29 @@ def _load_twiss(twiss, OBSERVABLES, OBSERVATION_POINTS=None):
         tw = twiss
     else:
         raise ValueError("twiss_file must be a string path to a .csv table or an xtrack.Table")
+
+    # Phase reference: taken from the full table, before selecting rows/columns
+    if phase_origin is not None:
+        i_origin = int(np.where(tw.name == phase_origin)[0][0])
+        index_in_ring = {name: i for i, name in enumerate(tw.name)}
+        mux_origin = tw.mux[i_origin]
+        muy_origin = tw.muy[i_origin]
+        qx = tw.qx
+        qy = tw.qy
+
     tw = tw.cols[OBSERVABLES]
     if OBSERVATION_POINTS is not None:
         tw = tw.rows[OBSERVATION_POINTS]
+
+    # Measure the phases from phase_origin (index-based wrap: e.g. 'ip.7' and 'ipa' share the same s,
+    # and in a line cycled to rf400 'ip.7' comes just before 'ipa', so it gets the +Q as in the RM)
+    if phase_origin is not None:
+        is_before_origin = np.array([index_in_ring[name] < i_origin for name in tw.name])
+        if 'mux' in OBSERVABLES:
+            tw['mux'] = tw.mux - mux_origin + is_before_origin * qx
+        if 'muy' in OBSERVABLES:
+            tw['muy'] = tw.muy - muy_origin + is_before_origin * qy
+
     return tw
 
 
@@ -1046,6 +1156,63 @@ def compute_pseudo_inverse(R, epsilon=0.001, full_matrices=False, Tikhonov_lambd
     return R_inv, U, S, VT
 
 
+def build_row_weights(OBSERVATION_POINTS, OBSERVABLES, observable_weights=None, ip_weight=1.0):
+    '''
+    Row weights for the response matrix, in the same order as _construct_vector
+    (observable-major: all points of OBSERVABLES[0], then all points of OBSERVABLES[1], ...).
+
+    observable_weights : dict, e.g. {'dy': 10.0}; observables not listed get weight 1
+    ip_weight          : extra weight for observation points whose name starts with 'ip'
+    '''
+    n_points = len(OBSERVATION_POINTS)
+
+    point_weights = np.ones(n_points)
+    if ip_weight != 1.0:
+        is_ip = np.array([name.startswith('ip') for name in OBSERVATION_POINTS])
+        point_weights[is_ip] = ip_weight
+
+    row_weights = []
+    for obs in OBSERVABLES:
+        if observable_weights is not None and obs in observable_weights:
+            w_obs = observable_weights[obs]
+        else:
+            w_obs = 1.0
+        row_weights.append(w_obs * point_weights)
+
+    return np.concatenate(row_weights)
+
+
+def compute_weighted_pseudo_inverse(R, row_weights=None, epsilon=0.001):
+    '''
+    Pseudo-inverse of the response matrix with
+      (1) row weights (observables / observation points), and
+      (2) column normalisation, so that the singular-value cut is not dominated
+          by the few high-beta correctors.
+    Returns R_inv such that  dk = R_inv @ (target * row_weights).
+    '''
+    # (1) weight the rows
+    if row_weights is None:
+        row_weights = np.ones(R.shape[0])
+    Rw = R * row_weights[:, None]
+
+    # (2) normalise each corrector column to unit norm
+    col_norms = np.linalg.norm(Rw, axis=0)
+    Rn = Rw / col_norms[None, :]
+
+    # truncated SVD of the normalised matrix
+    U, S, VT = np.linalg.svd(Rn, full_matrices=False)
+    S_inv = np.zeros_like(S)
+    keep = S > epsilon * S.max()
+    S_inv[keep] = 1.0 / S[keep]
+    Rn_inv = VT.T @ np.diag(S_inv) @ U.T
+
+    # undo the column normalisation (back to physical corrector strengths)
+    R_inv = Rn_inv / col_norms[:, None]
+
+    n_kept = int(np.sum(keep))
+    return R_inv, S, n_kept
+
+
 def _measurement_noise(n_points, measurement_errors, rgen, nsigma=2.5):
     """Noise vector matching the layout of _construct_vector: one sigma per observable."""
     return np.concatenate([_truncated_normal(rgen, n_points, s, nsigma)
@@ -1053,7 +1220,8 @@ def _measurement_noise(n_points, measurement_errors, rgen, nsigma=2.5):
 
 
 def apply_optics_correction(line, RM_inv, corr_knob_names, tw_ref, OBSERVATION_POINTS, OBSERVABLES, nloops,
-                            measurement_errors=None, meas_seed=None, nsigma=2.5):
+                            measurement_errors=None, meas_seed=None, nsigma=2.5,
+                            row_weights=None, phase_origin=None, orbit_feedback=None): # [Change 14.10.2026] orbit_feedback
     """
     Apply optics correction to the line by iteratively calculating the strength deltas 
     from the response matrix and applying them to the correctors.
@@ -1085,26 +1253,44 @@ def apply_optics_correction(line, RM_inv, corr_knob_names, tw_ref, OBSERVATION_P
         Only relevant if measurement_errors is provided.
     nsigma : float, optional
         Number of standard deviations to truncate the normal distribution for the measurement errors.
+    row_weights : np.ndarray, optional
+        Weights for the rows of the response matrix, corresponding to the observables and observation points. 
+        If None, all rows are weighted equally. Default is None.
+    phase_origin : str, optional
+        Element from which the phases (mux, muy) are measured, which must be the first element of the line 
+        used to build the response matrix (for the present RMs: 'ipa'). This allows the line to be cycled 
+        anywhere (e.g. at rf400). If None, the phases are taken as they are in the twiss. Default is None.
+    orbit_feedback : callable, optional [Change 14.10.2026]
+        Function orbit_feedback(line), called before every optics measurement, e.g. to correct the orbit again.
+        The optics correctors kick the beam where it passes off-centre, so every correction step moves the orbit;
+        in the IR sextupoles (beta_y ~ 9 km) this changes the optics through feed-down, and without an orbit
+        feedback the iterations can diverge. If None, the orbit is not touched. Default is None.
     
     Returns
         The function modifies the line in place by applying the correction to the correctors.
     """
-    tw0 = _load_twiss(tw_ref, OBSERVATION_POINTS=OBSERVATION_POINTS, OBSERVABLES=OBSERVABLES)
+    tw0 = _load_twiss(tw_ref, OBSERVATION_POINTS=OBSERVATION_POINTS, OBSERVABLES=OBSERVABLES, phase_origin=phase_origin)
     vector0 = _construct_vector(tw0, OBSERVABLES=OBSERVABLES)
 
     if measurement_errors is not None:
         assert len(measurement_errors) == len(OBSERVABLES), \
             "measurement_errors must have one sigma per observable"
         rgen_meas = np.random.RandomState(meas_seed)   # created ONCE, outside the loop
-    
+
+    co_guess = None
     for i in range(nloops):
-        tw_before = line.twiss(coupling_edw_teng=True, matrix_stability_tol=0.20)
+        if orbit_feedback is not None: # [Change 14.10.2026]
+            orbit_feedback(line)
+            co_guess = None # the orbit may have changed
+        tw_before = line.twiss(coupling_edw_teng=True, matrix_stability_tol=0.20, co_guess = co_guess)
+        co_guess = tw_before.particle_on_co.copy()
+
         # Generate the real and imaginary coupling RDTs as separate columns in the twiss table
         for col in ['f1001', 'f1010']:
             tw_before[col + "c"] = np.real(tw_before[col])
             tw_before[col + "s"] = np.imag(tw_before[col])
 
-        tw1 = _load_twiss(tw_before, OBSERVATION_POINTS=OBSERVATION_POINTS, OBSERVABLES=OBSERVABLES)
+        tw1 = _load_twiss(tw_before, OBSERVATION_POINTS=OBSERVATION_POINTS, OBSERVABLES=OBSERVABLES, phase_origin=phase_origin)
         vector1 = _construct_vector(tw1, OBSERVABLES=OBSERVABLES)
 
         # Emulate the measurement: independent noise at every iteration
@@ -1114,6 +1300,13 @@ def apply_optics_correction(line, RM_inv, corr_knob_names, tw_ref, OBSERVATION_P
 
         # Create target
         target = vector0 - vector1
+
+        # Apply the same row weights that were used to build RM_inv
+        if row_weights is not None:
+            if len(row_weights) != len(target):
+                raise ValueError(f'row_weights has length {len(row_weights)} but the target has length {len(target)}: '
+                                 f'were the weights built for these OBSERVABLES ({OBSERVABLES})?')
+            target = target * row_weights
 
         # Calculate strength deltas
         STRENGTH_DELTAS = RM_inv @ target
