@@ -15,13 +15,49 @@ from lattice_markers import arc_markers, DS_markers, straight_markers, IR_marker
 ####################################
 # Settings
 seed = 22
+line_version = "LCC_107-0-1_z"
+
+
+#%%
+####################################
+# ERROR TABLE  (edit only here)
+# Misalignments: sigma_x, sigma_y, sigma_s in [um], sigma_rot in [urad]  (rot_s_rad_no_frame)
+# Field error:   relative error on the main strength (k0 / k1 / k2)
+# The row name sets the switch names, e.g. 'quad_arc' -> 'on_misalignment_quad_arc', 'on_field_error_quad_arc'
+ERROR_TABLE = {
+#                 sigma_x  sigma_y  sigma_s  sigma_rot    field   field error
+#                 [um]     [um]     [um]     [urad]       attr    [rel.]
+    # ARC
+    'dip_arc':  [  1000,    1000,    500,     1000,       'k0',   1e-3     ],
+    'quad_arc': [    50,      50,    100,       50,       'k1',   7 * 2e-4 ],
+    'sext_arc': [    50,      50,    100,       50,       'k2',   2e-4     ],
+    'girder':   [   150,     150,    500,      150,       None,   None     ],
+    # STRAIGHT SECTION
+    'dip_ir':   [  1000,    1000,    100,     1000,       'k0',   1e-3     ],  # FD -> CS element? For now counted as a straight dipole
+    'dip_tr':   [  1000,    1000,    100,     1000,       'k0',   1e-3     ],
+    'quad_fd':  [    30,      30,    100,       30,       'k1',   0.5e-4   ],
+    'quad_ff':  [    50,      50,    100,       50,       'k1',   1e-4     ],  # FF excluding FD
+    'quad_tr':  [   100,     100,    100,      100,       'k1',   2e-4     ],
+    'sext_ir':  [    50,      50,    100,       50,       'k2',   1e-4     ],  # incl. crab sextupoles
+}
+ 
+# Higher-order multipole errors (relative, at the reference radius)
+MULTIPOLE_REFERENCE_RADIUS = 1e-2  # [m]
+MULTIPOLE_TABLE = {
+    'dip_arc':  {'a1': 10e-4, 'b2': 5e-4,  'a2': 2e-4,  'b3': 0.5e-4, 'b4': 0.5e-4, 'a4': 0.1e-4},
+    'quad_arc': {'b1': 61e-4, 'a1': 23e-4, 'a2': 12e-4, 'b3': 4e-4},
+}
+ 
+# Global scaling factors (1.0 = nominal table)
+SCALE_MISALIGNMENT = 1.0
+SCALE_FIELD_ERROR  = 1.0
+SCALE_MULTIPOLE    = 1.0
 
 
 #%%
 ####################################
 # Load reference line with correctors installed
 print(f'Starting the process for seed {seed}!')
-line_version = "LCC_107-0-1_z"
 line = xt.Line.from_json('lattices/reference_lattice/fccee_z_with_correctors.json')
 line.cycle(name_first_element='rf400', inplace=True) # cycle to rf cavity
 line.configure_radiation(model=None, model_beamstrahlung=None) # disable radiation 
@@ -33,188 +69,83 @@ tw_ref = line.twiss() #tw_ref has 4D Twiss
 
 #%%
 ####################################
-# Group all element types based on the markers defined above
-
-arc_quad_names = find_elements(tt, marker_pairs=[arc_markers, DS_markers], element_type='Quadrupole').name # note: include the ds elements with the arc elements
-arc_dipole_names = find_elements(tt, marker_pairs=[arc_markers, DS_markers], element_type='RBend').name
-arc_sext_names = find_elements(tt, marker_pairs=[arc_markers, DS_markers], element_type='Sextupole').name
-
-IR_dipole_names = find_elements(tt, marker_pairs=[IR_markers], element_type='RBend').name # interaction region dipoles
-TR_dipole_names = find_elements(tt, marker_pairs=[TR_markers], element_type='RBend').name # technical region dipoles
-
-IR_quad_names = find_elements(tt, marker_pairs=[IR_markers], element_type='Quadrupole').name # interaction region quadrupoles
-FD_quad_names = find_elements(tt, pattern=['qd0a', 'qd0b', 'qd0cr', 'qd0cl', 'qf1a', 'qf1b', 'qf1cr', 'qf1cl', 'qf1dr', 'qf1dl'], element_type='Quadrupole').name # final doublet quadrupoles
-FF_quad_names = find_elements(tt, marker_pairs=[IR_markers], element_type='Quadrupole', except_names=FD_quad_names).name # final focusing quadrupoles
-TR_quad_names = find_elements(tt, marker_pairs=[TR_markers], element_type='Quadrupole').name # technical region quadrupoles
-
-IR_sext_names = find_elements(tt, marker_pairs=[IR_markers], element_type='Sextupole').name # interaction region sextupoles
-
-
-#%%
-####################################
-# Imperfections to arc elements
-
-# Misaligments
-# ARC DIPOLES
-apply_errors(line=line, pattern=None, seed=seed, sigmas=[1e-3, 1e-3, 0.5e-3, 1e-3], # <-- chosen error tolerances
-             attrs=['shift_x', 'shift_y', 'shift_s', 'rot_s_rad_no_frame'], # <-- attributes to apply the errors to
-             switch_name='on_misalignment_dip_arc', # <-- switch to turn on/off the errors
-             element_names=arc_dipole_names) # <-- lattice elements to apply the errors to
-line.vars['on_misalignment_dip_arc'] = 0
-# ARC QUADRUPOLES
-apply_errors(line=line, pattern=None, seed=seed, sigmas=[50e-6, 50e-6, 100e-6, 50e-6], # <-- chosen error tolerances
-             attrs=['shift_x', 'shift_y', 'shift_s', 'rot_s_rad_no_frame'], # <-- attributes to apply the errors to
-             switch_name='on_misalignment_quad_arc', # <-- switch to turn on/off the errors
-             element_names=arc_quad_names) # <-- lattice elements to apply the errors to
-line.vars['on_misalignment_quad_arc'] = 0
-# ARC SEXTUPOLES
-apply_errors(line=line, pattern=None, seed=seed, sigmas=[50e-6, 50e-6, 100e-6, 50e-6], # <-- chosen error tolerances
-             attrs=['shift_x', 'shift_y', 'shift_s', 'rot_s_rad_no_frame'], # <-- attributes to apply the errors to
-             switch_name='on_misalignment_sext_arc', # <-- switch to turn on/off the errors
-             element_names=arc_sext_names) # <-- lattice elements to apply the errors to
-line.vars['on_misalignment_sext_arc'] = 0
-
-# Field errors
-# ARC DIPOLES
-_ = apply_errors(line=line, pattern=None, seed=seed, sigmas=[1e-3], attrs=['k0'], # <-- chosen error tolerance and attribute to apply the errors to
-                    wrt_current_expr=True, # <-- careful, do not apply it twice!
-                    apply_relative=True, # <-- to apply the value as a relative change (i.e., multiplied by the existing value)
-                    switch_name='on_field_error_dip_arc', # <-- switch to turn on/off the errors
-                    element_names=arc_dipole_names) # <-- lattice elements to apply the errors to
-line.vars['on_field_error_dip_arc'] = 0
-# ARC QUADRUPOLES
-_ = apply_errors(line=line, pattern=None, seed=seed, sigmas=[7*2e-4], attrs=['k1'], # <-- chosen error tolerance and attribute to apply the errors to
-                    wrt_current_expr=True, # <-- careful, do not apply it twice!
-                    apply_relative=True, # <-- to apply the value as a relative change (i.e., multiplied by the existing value)
-                    switch_name='on_field_error_quad_arc', # <-- switch to turn on/off the errors
-                    element_names=arc_quad_names) # <-- lattice elements to apply the errors to
-line.vars['on_field_error_quad_arc'] = 0
-# ARC SEXTUPOLES
-_ = apply_errors(line=line, pattern=None, seed=seed, sigmas=[2e-4], attrs=['k2'], # <-- chosen error tolerance and attribute to apply the errors to
-                    wrt_current_expr=True, # <-- careful, do not apply it twice!
-                    apply_relative=True, # <-- to apply the value as a relative change (i.e., multiplied by the existing value)
-                    switch_name='on_field_error_sext_arc', # <-- switch to turn on/off the errors
-                    element_names=arc_sext_names) # <-- lattice elements to apply the errors to
-line.vars['on_field_error_sext_arc'] = 0
-
-# Higher order field errors
-# ARC DIPOLES
-_ = apply_errors(line=line, pattern=None, seed=seed, sigmas=[10e-4, 5e-4, 2e-4, 0.5e-4, 0.5e-4, 0.1e-4], attrs=['a1', 'b2', 'a2', 'b3', 'b4', 'a4'],
-                 reference_radius=1e-2,
-                 switch_name='on_mult_error_dip_arc',
-                 element_names=arc_dipole_names)
-line.vars['on_mult_error_dip_arc'] = 0
-# ARC QUADRUPOLES
-_ = apply_errors(line=line, pattern=None, seed=seed, sigmas=[61e-4, 23e-4, 12e-4, 4e-4], attrs=['b1', 'a1', 'a2', 'b3'],
-                 reference_radius=1e-2,
-                 switch_name='on_mult_error_quad_arc',
-                 element_names=arc_quad_names)
-line.vars['on_mult_error_quad_arc'] = 0
-
-print(f'Done arc imperfections for seed {seed}.')
+# Element names for each row of the table (girder is handled separately, via the arc markers)
+ 
+FD_quad_names = find_elements(tt, pattern=['qd0a', 'qd0b', 'qd0cr', 'qd0cl', 'qf1a', 'qf1b', 'qf1cr', 'qf1cl', 'qf1dr', 'qf1dl'], element_type='Quadrupole').name
+ 
+ELEMENT_NAMES = {
+    # ARC (DS elements included with the arc elements)
+    'dip_arc':  find_elements(tt, marker_pairs=[arc_markers, DS_markers], element_type='RBend').name, # note: include the ds elements with the arc elements
+    'quad_arc': find_elements(tt, marker_pairs=[arc_markers, DS_markers], element_type='Quadrupole').name,
+    'sext_arc': find_elements(tt, marker_pairs=[arc_markers, DS_markers], element_type='Sextupole').name,
+    # STRAIGHT SECTION
+    'dip_ir':   find_elements(tt, marker_pairs=[IR_markers], element_type='RBend').name, # interaction region dipoles
+    'dip_tr':   find_elements(tt, marker_pairs=[TR_markers], element_type='RBend').name, # technical region dipoles
+    'quad_fd':  FD_quad_names, # interaction region quadrupoles
+    'quad_ff':  find_elements(tt, marker_pairs=[IR_markers], element_type='Quadrupole', except_names=FD_quad_names).name, # final doublet quadrupoles
+    'quad_tr':  find_elements(tt, marker_pairs=[TR_markers], element_type='Quadrupole').name, # technical region quadrupoles
+    'sext_ir':  find_elements(tt, marker_pairs=[IR_markers], element_type='Sextupole').name, # interaction region sextupoles
+}
 
 
 #%%
 ####################################
-# Imperfections to girders
-
-# Misalignments
-groups = apply_girder_misalignments(line=line, seed=seed, sigmas=[0.15e-3, 0.15e-3, 0.5e-3, 0.15e-3], # <-- chosen error tolerances
-                                        attrs=['shift_x', 'shift_y', 'shift_s', 'rot_s_rad_no_frame'], # <-- attributes to apply the errors to
-                                        switch_name='on_misalignment_girder', # <-- switch to turn on/off the errors
-                                        line_table=tt, marker_pairs_arcs=[arc_markers]) # <-- filtering via marker pairs to identify the arcs
-line.vars['on_misalignment_girder'] = 0
-
-print(f'Done girder imperfections for seed {seed}.')
+# Apply misalignments
+um = 1e-6
+urad = 1e-6
+MISALIGNMENT_ATTRS = ['shift_x', 'shift_y', 'shift_s', 'rot_s_rad_no_frame']
+for group, row in ERROR_TABLE.items():
+    sigma_x, sigma_y, sigma_s, sigma_rot, field_attr, field_sigma = row
+    sigmas = [sigma_x * um * SCALE_MISALIGNMENT,
+              sigma_y * um * SCALE_MISALIGNMENT,
+              sigma_s * um * SCALE_MISALIGNMENT,
+              sigma_rot * urad * SCALE_MISALIGNMENT]
+    switch_name = f'on_misalignment_{group}'
+    if group == 'girder':
+        apply_girder_misalignments(line=line, seed=seed, sigmas=sigmas, 
+                                   attrs=MISALIGNMENT_ATTRS, 
+                                   switch_name=switch_name, 
+                                   line_table=tt, marker_pairs_arcs=[arc_markers]) # <-- filtering via marker pairs to identify the arcs
+    else:
+        apply_errors(line=line, pattern=None, seed=seed, sigmas=sigmas, # <-- chosen error tolerances
+                     attrs=MISALIGNMENT_ATTRS, # <-- attributes to apply the errors to
+                     switch_name=switch_name, # <-- switch to turn on/off the errors
+                     element_names=ELEMENT_NAMES[group]) # <-- lattice elements to apply the errors to
+    line.vars[switch_name] = 0 
+print(f'Done misalignments for seed {seed}.')
 
 
 #%%
 ####################################
-# Imperfections straight sections
+# Apply main field errors (relative)
+for group, row in ERROR_TABLE.items():
+    sigma_x, sigma_y, sigma_s, sigma_rot, field_attr, field_sigma = row
+    if field_attr is None:
+        continue
+    switch_name = f'on_field_error_{group}'
+    apply_errors(line=line, pattern=None, seed=seed,
+                 sigmas=[field_sigma * SCALE_FIELD_ERROR], attrs=[field_attr],  # <-- chosen error tolerance and attribute to apply the errors to
+                 wrt_current_expr=True,  # <-- careful, do not apply it twice!
+                 apply_relative=True,    # <-- to apply the value as a relative change (i.e., multiplied by the existing value)
+                 switch_name=switch_name, # <-- switch to turn on/off the errors
+                 element_names=ELEMENT_NAMES[group]) # <-- lattice elements to apply the errors to
+    line.vars[switch_name] = 0
+print(f'Done field errors for seed {seed}.')
 
-# Misaligments in straights
-# INTERACTION REGION (IR) DIPOLES ---------------------------> counts as FD -> CS element? For now counting it as a straight dipole
-apply_errors(line=line, pattern=None, seed=seed, sigmas=[1e-3, 1e-3, 0.1e-3, 1e-3], 
-             attrs=['shift_x', 'shift_y', 'shift_s', 'rot_s_rad_no_frame'], 
-             switch_name='on_misalignment_dip_ir',
-             element_names=IR_dipole_names)
-line.vars['on_misalignment_dip_ir'] = 0
-# TECHNICAL REGION (TR) DIPOLES
-apply_errors(line=line, pattern=None, seed=seed, sigmas=[1e-3, 1e-3, 0.1e-3, 1e-3], 
-             attrs=['shift_x', 'shift_y', 'shift_s', 'rot_s_rad_no_frame'], 
-             switch_name='on_misalignment_dip_tr',
-             element_names=TR_dipole_names)
-line.vars['on_misalignment_dip_tr'] = 0
-# FINAL DOUBLET (FD) QUADRUPOLES
-apply_errors(line=line, pattern=None, seed=seed, sigmas=[30e-6, 30e-6, 100e-6, 30e-6], 
-             attrs=['shift_x', 'shift_y', 'shift_s', 'rot_s_rad_no_frame'], 
-             switch_name='on_misalignment_quad_fd',
-             element_names=FD_quad_names)
-line.vars['on_misalignment_quad_fd'] = 0
-# FINAL FOCUSING (FF) QUADRUPOLES
-apply_errors(line=line, pattern=None, seed=seed, sigmas=[50e-6, 50e-6, 100e-6, 50e-6], 
-             attrs=['shift_x', 'shift_y', 'shift_s', 'rot_s_rad_no_frame'], 
-             switch_name='on_misalignment_quad_ff',
-             element_names=FF_quad_names)
-line.vars['on_misalignment_quad_ff'] = 0
-# TECHNICAL REGION (TR) QUADRUPOLES
-apply_errors(line=line, pattern=None, seed=seed, sigmas=[100e-6, 100e-6, 100e-6, 100e-6], 
-             attrs=['shift_x', 'shift_y', 'shift_s', 'rot_s_rad_no_frame'], 
-             switch_name='on_misalignment_quad_tr',
-             element_names=TR_quad_names)
-line.vars['on_misalignment_quad_tr'] = 0
-# INTERACTION REGION (IR) SEXTUPOLES ---------------------------> counting as FD->CS element
-apply_errors(line=line, pattern=None, seed=seed, sigmas=[50e-6, 50e-6, 100e-6, 50e-6], 
-             attrs=['shift_x', 'shift_y', 'shift_s', 'rot_s_rad_no_frame'], 
-             switch_name='on_misalignment_sext_ir',
-             element_names=IR_sext_names)
-line.vars['on_misalignment_sext_ir'] = 0
 
-# Field errors in straights
-# INTERACTION REGION (IR) DIPOLES
-_ = apply_errors(line=line, pattern=None, seed=seed, 
-                    sigmas=[1e-3], attrs=['k0'], wrt_current_expr=True, # <-- careful, do not apply it twice!
-                    apply_relative=True, # <-- to apply the value as a relative change (i.e., multiplied by the existing value)
-                    switch_name='on_field_error_dip_ir',
-                    element_names=IR_dipole_names)
-line.vars['on_field_error_dip_ir'] = 0
-# TECHNICAL REGION (TR) DIPOLES
-_ = apply_errors(line=line, pattern=None, seed=seed, 
-                    sigmas=[1e-3], attrs=['k0'], wrt_current_expr=True, # <-- careful, do not apply it twice!
-                    apply_relative=True, # <-- to apply the value as a relative change (i.e., multiplied by the existing value)
-                    switch_name='on_field_error_dip_tr',
-                    element_names=TR_dipole_names)
-line.vars['on_field_error_dip_tr'] = 0
-# FINAL DOUBLET (FD) QUADRUPOLES
-_ = apply_errors(line=line, pattern=None, seed=seed, 
-                    sigmas=[0.5e-4], attrs=['k1'], wrt_current_expr=True, # <-- careful, do not apply it twice!
-                    apply_relative=True, # <-- to apply the value as a relative change (i.e., multiplied by the existing value)
-                    switch_name='on_field_error_quad_fd',
-                    element_names=FD_quad_names)
-line.vars['on_field_error_quad_fd'] = 0
-# FINAL FOCUSING (FF) QUADRUPOLES
-_ = apply_errors(line=line, pattern=None, seed=seed, 
-                    sigmas=[1e-4], attrs=['k1'], wrt_current_expr=True, # <-- careful, do not apply it twice!
-                    apply_relative=True, # <-- to apply the value as a relative change (i.e., multiplied by the existing value)
-                    switch_name='on_field_error_quad_ff',
-                    element_names=FF_quad_names)
-line.vars['on_field_error_quad_ff'] = 0
-# TECHNICAL REGION (TR) QUADRUPOLES
-_ = apply_errors(line=line, pattern=None, seed=seed, 
-                    sigmas=[2e-4], attrs=['k1'], wrt_current_expr=True, # <-- careful, do not apply it twice!
-                    apply_relative=True, # <-- to apply the value as a relative change (i.e., multiplied by the existing value)
-                    switch_name='on_field_error_quad_tr',
-                    element_names=TR_quad_names)
-line.vars['on_field_error_quad_tr'] = 0
-# INTERACTION REGION (IR) SEXTUPOLES
-_ = apply_errors(line=line, pattern=None, seed=seed, 
-                    sigmas=[1e-4], attrs=['k2'], wrt_current_expr=True, # <-- careful, do not apply it twice!
-                    apply_relative=True, # <-- to apply the value as a relative change (i.e., multiplied by the existing value)
-                    switch_name='on_field_error_sext_ir',
-                    element_names=IR_sext_names)
-line.vars['on_field_error_sext_ir'] = 0
-
-print(f'Done straight section imperfections for seed {seed}.')
+#%%
+####################################
+# Apply higher-order multipole errors
+for group, multipoles in MULTIPOLE_TABLE.items():
+    attrs = list(multipoles.keys())
+    sigmas = [multipoles[attr] * SCALE_MULTIPOLE for attr in attrs]
+    switch_name = f'on_mult_error_{group}'
+    apply_errors(line=line, pattern=None, seed=seed, sigmas=sigmas, attrs=attrs,
+                 reference_radius=MULTIPOLE_REFERENCE_RADIUS,
+                 switch_name=switch_name,
+                 element_names=ELEMENT_NAMES[group])
+    line.vars[switch_name] = 0 
+print(f'Done multipole errors for seed {seed}.')
 
 
 #%%
